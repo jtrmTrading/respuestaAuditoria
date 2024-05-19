@@ -1,0 +1,78 @@
+1. Reentrancy Attack (Ataque de reentrancia)
+La vulnerabilidad de reentrancia se encuentra en la función `withdraw` (linea 12). 
+La lógica de actualización del saldo del usuario ocurre **después** de realizar 
+la llamada externa (`msg.sender.call{value: balance}("")`) (linea 17). 
+Un atacante puede aprovechar esta vulnerabilidad para hacer múltiples retiros 
+antes de que el saldo se actualice a cero.
+
+**Solución:**
+Primero, actualiza el saldo del usuario, y luego realiza la llamada externa.
+
+2. Call Vulnerability
+El uso de `call` puede ser peligroso, ya que envía todo el gas restante a la llamada externa  (linea 17). 
+Esto puede ser utilizado por un atacante para manipular el contrato. Aunque `call` es necesario 
+para enviar Ether en los contratos de Solidity >=0.6.0, es importante manejar adecuadamente el 
+gas y asegurarse de no dejar la puerta abierta a ataques.
+
+**Solución:**
+En lugar de usar `call`, puedes usar `transfer` o `send`, aunque estos métodos tienen limitaciones 
+con el gas. En este caso, asegurar que el estado se actualiza antes de la llamada externa es clave.
+
+3. Verificación de balance
+Actualmente, el contrato utiliza `require(balance > 0, "Insufficient balance")` (linea 15), lo cual está bien, 
+pero es importante mencionar que al ser una verificación de una condición, no debería haber una 
+vulnerabilidad directa relacionada con esto, aunque la lógica adicional podría ser requerida para 
+ciertas verificaciones más robustas.
+
+4. Ausencia de eventos
+Es una buena práctica emitir eventos para las operaciones críticas como depósitos y retiros. 
+Esto no es una vulnerabilidad en sí misma, pero mejora la trazabilidad y transparencia del contrato.
+
+**Solución:**
+Agregar eventos para las funciones de depósito y retiro.
+
+5. Potential Denial of Service (DoS) Attack
+En ciertos casos, un contrato puede volverse inoperable si se ejecutan ciertas acciones maliciosas. 
+Aunque este ejemplo es relativamente simple y no sufre directamente de un DoS en su forma actual, 
+es importante considerar todas las posibles interacciones de usuarios y contratos que podrían inducir 
+a este problema.
+
+
+Aquí está la versión mejorada del contrato:
+
+pragma solidity 0.8.20;
+
+// SPDX-License-Identifier: MIT
+
+contract PrivateBank {
+    mapping(address => uint256) private balances;
+
+    event Deposit(address indexed user, uint256 amount);
+    event Withdrawal(address indexed user, uint256 amount);
+
+    function deposit() external payable {
+        balances[msg.sender] += msg.value;
+        emit Deposit(msg.sender, msg.value);
+    }
+
+    function withdraw() external {
+        uint256 balance = getUserBalance(msg.sender);
+
+        require(balance > 0, "Insufficient balance");
+
+        balances[msg.sender] = 0; // Update balance before external call
+
+        (bool success, ) = msg.sender.call{value: balance}("");
+        require(success, "Failed to send Ether");
+
+        emit Withdrawal(msg.sender, balance);
+    }
+
+    function getBalance() external view returns (uint256) {
+        return address(this).balance;
+    }
+
+    function getUserBalance(address _user) public view returns (uint256) {
+        return balances[_user];
+    }
+}
